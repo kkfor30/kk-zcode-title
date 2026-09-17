@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="hero-t hero-d">
+  <title id="hero-t">kk-zcode-title</title>
+  <desc id="hero-d">ZCode 插件。左侧是自动命名前的模糊标题，右侧是命名后侧边栏里看到的具体标题：邮箱注册｜修复、产品短片｜分镜调整、登录页｜视觉还原。每轮对话结束后由后台独立模型判断是否更新。</desc>
+  <defs>
+    <linearGradient id="scrimH" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#070A11" stop-opacity="0.86"/>
+      <stop offset="0.5" stop-color="#070A11" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="#070A11" stop-opacity="0.68"/>
+    </linearGradient>
+    <linearGradient id="scrimV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#070A11" stop-opacity="0.72"/>
+      <stop offset="0.3" stop-color="#070A11" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#070A11" stop-opacity="0.6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- generated raster plate -->
+  <rect width="1200" height="560" fill="#0A0D14"/>
+  <image href="hero-bg.webp" x="0" y="0" width="1200" height="560" preserveAspectRatio="xMidYMid slice"/>
+  <rect width="1200" height="560" fill="url(#scrimH)"/>
+  <rect width="1200" height="560" fill="url(#scrimV)"/>
+
+  <g id="title-block">
+    <text x="64" y="76" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18" letter-spacing="1" fill="#8B98AE">ZCODE 插件 · 话题自动命名</text>
+    <rect x="64" y="88" width="44" height="3" rx="1.5" fill="#4D8DFF"/>
+    <text x="64" y="158" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="62" font-weight="700" letter-spacing="-1" fill="#E9EEF8">kk-zcode-title</text>
+    <text x="64" y="202" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" fill="#B9C4D6">每轮对话结束后，后台独立模型把话题标题</text>
+    <text x="64" y="230" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" fill="#B9C4D6">维护成稳定的「类别 emoji + 对象｜目标」</text>
+  </g>
+
+  <g id="meta">
+    <rect x="752" y="58" width="146" height="36" rx="10" fill="#FFFFFF" fill-opacity="0.06" stroke="#2C3A50"/>
+    <text x="825" y="81" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="16" fill="#9AA8BE" text-anchor="middle">Python 3.10+</text>
+    <rect x="910" y="58" width="124" height="36" rx="10" fill="#FFFFFF" fill-opacity="0.06" stroke="#2C3A50"/>
+    <text x="972" y="81" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="16" fill="#9AA8BE" text-anchor="middle">零第三方依赖</text>
+    <rect x="1046" y="58" width="90" height="36" rx="10" fill="#FFFFFF" fill-opacity="0.06" stroke="#2C3A50"/>
+    <text x="1091" y="81" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="16" fill="#9AA8BE" text-anchor="middle">MIT</text>
+  </g>
+
+  <g id="board">
+    <rect x="64" y="274" width="296" height="238" rx="16" fill="#0B111A" fill-opacity="0.66" stroke="#253145"/>
+    <text x="88" y="310" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" fill="#7E8AA0">原来的标题</text>
+    <line x1="88" y1="324" x2="336" y2="324" stroke="#253145"/>
+    <text x="88" y="351" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="25" fill="#6E7A90">新会话</text>
+    <text x="88" y="413" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="25" fill="#6E7A90">帮我看下这个页面</text>
+    <text x="88" y="475" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="25" fill="#6E7A90">继续修改</text>
+    <rect x="436" y="274" width="700" height="238" rx="16" fill="#0E141F" fill-opacity="0.9" stroke="#2C3A50"/>
+    <text x="460" y="310" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" fill="#4D8DFF">ZCode 侧边栏 · 每轮自动维护</text>
+    <line x1="460" y1="324" x2="1112" y2="324" stroke="#2C3A50"/>
+    <text x="534" y="351" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="26" font-weight="600" fill="#E9EEF8">产品短片｜分镜调整</text>
+    <text x="534" y="413" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="26" font-weight="600" fill="#E9EEF8">登录页｜视觉还原</text>
+    <text x="534" y="475" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="26" font-weight="600" fill="#E9EEF8">推理模型｜选型对比</text>
+    <rect x="465" y="313" width="58" height="58" rx="14" fill="#080B11"/>
+    <rect x="465" y="375" width="58" height="58" rx="14" fill="#080B11"/>
+    <rect x="465" y="437" width="58" height="58" rx="14" fill="#080B11"/>
+    <g fill="none" stroke="#4D8DFF" stroke-opacity="0.75" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M376 342 h44 m-9-8 9 8 -9 8"/>
+      <path d="M376 404 h44 m-9-8 9 8 -9 8"/>
+      <path d="M376 466 h44 m-9-8 9 8 -9 8"/>
+    </g>
+  </g>
+</svg>
