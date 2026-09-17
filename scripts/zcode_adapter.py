@@ -121,14 +121,21 @@ def detect_providers() -> tuple[list[dict], list[dict]]:
 # ---------------------------------------------------------------------------
 
 def _urlopen(request, timeout):
-    """系统代理不可达（如代理软件已退出）时自动回退直连。HTTP 业务错误不重试。"""
+    """系统代理不可达（如代理软件已退出）时自动回退直连。HTTP 业务错误不重试。
+
+    首次失败时 ProxyHandler 已把 request 改写为指向代理（set_proxy 污染），
+    因此回退必须重建干净的原始请求，否则仍会连向已死的代理端口。
+    """
     try:
         return urllib.request.urlopen(request, timeout=timeout)
     except urllib.error.HTTPError:
         raise
     except (urllib.error.URLError, TimeoutError, OSError):
         direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        return direct.open(request, timeout=timeout)
+        fresh = urllib.request.Request(
+            request.full_url, data=request.data, method=request.get_method(),
+            headers=dict(request.header_items()))
+        return direct.open(fresh, timeout=timeout)
 
 
 def _chat_openai(base_url, api_key, model, system, user_text, timeout) -> tuple[str, dict]:
