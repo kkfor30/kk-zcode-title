@@ -16,8 +16,12 @@
 把下面这段直接发给 ZCode：
 
 ```text
-帮我安装并启用 GitHub 上的 kkfor30/kk-zcode-title 插件：
-下载仓库解压到一个固定路径，执行 python install.py，然后重启 ZCode。
+帮我安装并启用 ZCode 的 kk-zcode-title 插件。
+
+仓库地址：https://github.com/kkfor30/kk-zcode-title
+安装包：https://github.com/kkfor30/kk-zcode-title/releases/latest/download/kk-zcode-title.zip
+
+把安装包下载后解压到一个固定路径，在该目录执行 python install.py，然后重启 ZCode。
 重启后从 ZCode 已接入的厂商里挑一个轻量档模型配成命名模型，
 并确认每轮对话结束后侧边栏标题会自动更新。
 需要我手动操作的步骤请告诉我。
