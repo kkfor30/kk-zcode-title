@@ -13,18 +13,11 @@
 
 ## 让 Agent 帮你装
 
-把下面这段直接发给 ZCode：
+复制这段发给 ZCode：
 
 ```text
-帮我安装并启用 ZCode 的 kk-zcode-title 插件。
-
-仓库地址：https://github.com/kkfor30/kk-zcode-title
-安装包：https://github.com/kkfor30/kk-zcode-title/releases/latest/download/kk-zcode-title.zip
-
-把安装包下载后解压到一个固定路径，在该目录执行 python install.py，然后重启 ZCode。
-重启后从 ZCode 已接入的厂商里挑一个轻量档模型配成命名模型，
-并确认每轮对话结束后侧边栏标题会自动更新。
-需要我手动操作的步骤请告诉我。
+安装并启用这个 ZCode 插件：https://github.com/kkfor30/kk-zcode-title
+装好后用一小段话告诉我：它能做什么、怎么用，以及我接下来还需要做什么（比如重启或配置）。
 ```
 
 装好之后不需要记任何命令——直接说「预览这个话题的新标题」「固定这个话题的标题」「暂停自动命名」，它会照做。
