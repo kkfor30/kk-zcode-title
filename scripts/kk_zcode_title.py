@@ -651,6 +651,15 @@ def main():
                         thread_id, root, config, apply=is_worker or args.apply,
                         event_turn="latest" if is_worker else None,
                     )
+                    # Stop 事件发出后宿主可能仍在异步落库，首轮评估易过期；
+                    # 稍候重读快照再试一次，避免最后一轮的标题缺失。
+                    if is_worker and result["status"] == "stale_result":
+                        time.sleep(15)
+                        result = process_thread(
+                            backend, lambda context: limited_title(root, config, context,
+                                before_model=lambda: ensure_title_active(backend, thread_id, root)),
+                            thread_id, root, config, apply=True, event_turn="latest",
+                        )
                     if is_worker and result["status"] not in ("renamed", "kept"):
                         audit(root, thread_id, result)
         if args.command != "worker":
