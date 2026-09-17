@@ -16,7 +16,7 @@ HAS_BG = os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 # (icon index, centre x, centre y) in SVG units, for the three "after" rows
 ICON_SIZE = 58
-ICON_PLACEMENTS = [(0, 494, 342), (3, 494, 404), (2, 494, 466)]
+ICON_PLACEMENTS = [(0, 494, 342), (7, 494, 404), (6, 494, 466)]
 
 BEFORE = ['新会话', '帮我看下这个页面', '继续修改']
 AFTER = ['产品短片｜分镜调整', '登录页｜视觉还原', '推理模型｜选型对比']

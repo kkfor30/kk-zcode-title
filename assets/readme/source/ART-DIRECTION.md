@@ -42,15 +42,18 @@
 | --- | --- | --- |
 | assets/readme/hero.webp | 混合合成 → 发布 WebP | 第一屏：名称 + 价值 + 侧栏前后对照 |
 | assets/readme/how-it-works.svg | 纯 SVG | Stop Hook → Worker → 模型 → 写回 流程 |
-| assets/readme/categories.webp | 纯 SVG 渲染 → 发布 WebP | 12 个类别 emoji 胶囊网格 |
+| assets/readme/categories.webp | 混合合成 → 发布 WebP | 12 个类别胶囊网格，每格一枚 3D 图标 |
 | assets/readme/source/hero-layout.svg | 布局源 | hero 可编辑布局 |
 | assets/readme/source/categories-layout.svg | 布局源 | 类别模块可编辑布局 |
 | assets/readme/source/hero-bg.webp | GPT 生成 | hero 背景板（原图 1.17 MB → 29 KB） |
-| assets/readme/source/category-icons.webp | GPT 生成 | 3D 类别图标，供 hero 的行图标使用（1.42 MB → 101 KB） |
+| assets/readme/source/category-icons.webp | GPT 生成 | 4×3 十二枚 3D 类别图标（1.5 MB → 138 KB） |
 
-类别模块用系统彩色 emoji 直接渲染成位图，保证所有平台看到同一套字形；类别定义留在
-README 表格里，便于检索、翻译与随提示词更新。3D 图标只用在 hero 的三行，因为类别体系
-会随命名规则演进（本次已由 8 类扩到 12 类），把它绑到固定的生成图上会很快过时。
+类别表由提示词文件 `category-icons-prompt.txt` 生成，顺序即类别顺序：裁切按 4×3 等分
+格子，先用亮度包围盒定位每个图标再钳制回本格，避免相邻图标串味。图标顺序若与
+`CELLS` 不一致，配图会整体错位。
+
+类别定义留在 README 表格里，便于检索、翻译与随提示词更新；图片只负责让体系可扫读。
+命名规则改动后，需要重出图标表并重跑 `build.py`。
 
 ## 重建
 ```bash
