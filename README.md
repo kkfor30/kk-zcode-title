@@ -28,8 +28,8 @@
 
 **方式一：下载压缩包**
 
-1. 下载 [kk-zcode-title.zip](https://github.com/kkfor30/kk-zcode-title/releases/latest/download/kk-zcode-title.zip)，解压到任意**固定**路径（注册后不要移动这个目录）
-2. 在解压出的目录里执行 `python install.py`
+1. 下载 [kk-zcode-title.zip](https://github.com/kkfor30/kk-zcode-title/releases/latest/download/kk-zcode-title.zip) 并解压，放在哪里都行
+2. 执行 `python install.py`
 3. 重启 ZCode
 
 **方式二：克隆仓库**
@@ -39,7 +39,9 @@ git clone https://github.com/kkfor30/kk-zcode-title.git
 cd kk-zcode-title && python install.py
 ```
 
-然后重启 ZCode。卸载执行 `python install.py --uninstall`。
+`install.py` 会把插件复制到 `~/.zcode/plugins/kk-zcode-title` 并在 ZCode 里注册启用——**装完之后解压出来的目录就可以删了**，插件的运行数据也全部集中在 `~/.zcode/` 下，不写在项目目录里。
+
+卸载执行 `python install.py --uninstall`；如果解压目录已经删了，重新下载一份再执行即可。
 
 > **首次安装后会带你选一个命名模型**（推荐 flash / turbo 这类轻量档）。它直接读你 ZCode 里已接入厂商的 API Key，真实试调一次，可用才写入——**不需要另外申请 Key**。这一步只做一次，之后每轮对话结束标题就自动更新了。想换模型或加一家兜底，说一声就行。
 
