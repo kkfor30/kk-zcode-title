@@ -253,26 +253,53 @@ class ZCodeBackend:
     def read(self, session_id: str) -> dict:
         """组装为与原 Codex thread 相同形状：name/cwd/turns(id+items)。"""
         row = self._ro.execute(
-            "SELECT title, directory, time_archived FROM session WHERE id = ?",
+            "SELECT title, directory, time_archived, parent_id FROM session WHERE id = ?",
             (session_id,)).fetchone()
         if row is None:
             raise BackendError("会话不存在：" + session_id)
-        title, directory, archived = row
+        title, directory, archived, parent_id = row
         turns = self._read_turns(session_id)
         return {"id": session_id, "name": title or "", "cwd": directory or "",
-                "archived": archived is not None, "turns": turns}
+                "archived": archived is not None, "parent_id": parent_id or "",
+                "turns": turns}
+
+    def list_sessions(self, *, archived: bool = False) -> list[dict]:
+        """未归档（或已归档）会话的元数据清单；归档扫描用。"""
+        condition = "time_archived IS NOT NULL" if archived else "time_archived IS NULL"
+        rows = self._ro.execute(
+            f"SELECT id, title, directory, parent_id FROM session WHERE {condition}").fetchall()
+        return [{"id": r[0], "name": r[1] or "", "cwd": r[2] or "", "parent_id": r[3] or ""}
+                for r in rows]
+
+    def archive(self, session_id: str):
+        """写入归档时间戳；短事务 + 读回核验，不改其他状态。"""
+        conn = sqlite3.connect(db_path(), timeout=self.timeout)
+        try:
+            conn.execute("PRAGMA busy_timeout = 10000")
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "UPDATE session SET time_archived = ? WHERE id = ? AND time_archived IS NULL",
+                (int(time.time() * 1000), session_id))
+            if cursor.rowcount != 1:
+                conn.rollback()
+                raise BackendError("会话不存在或已归档：" + session_id)
+            conn.commit()
+        finally:
+            conn.close()
+        if not self.is_archived(session_id):
+            raise BackendError("归档写入后核验不一致")
 
     def _read_turns(self, session_id: str) -> list[dict]:
         messages = self._ro.execute(
             "SELECT id, sequence, data FROM message WHERE session_id = ? ORDER BY sequence",
             (session_id,)).fetchall()
-        text_parts: dict[str, list[str]] = {}
+        text_parts: dict[str, list] = {}
         for message_id, part_json in self._ro.execute(
                 "SELECT message_id, data FROM part WHERE session_id = ? "
                 "AND json_extract(data, '$.type') = 'text'", (session_id,)):
             part = json.loads(part_json)
             if part.get("text"):
-                text_parts.setdefault(message_id, []).append(part["text"])
+                text_parts.setdefault(message_id, []).append(part)
         turns: list[dict] = []
         for message_id, sequence, message_json in messages:
             message = json.loads(message_json)
@@ -281,7 +308,7 @@ class ZCodeBackend:
             if role == "user":
                 if semantics.get("origin") not in (None, "real_user"):
                     continue  # 过滤宿主注入的用户消息
-                texts = text_parts.get(message_id, [])
+                texts = [p["text"] for p in text_parts.get(message_id, [])]
                 if not texts:
                     continue
                 turns.append({
@@ -291,10 +318,12 @@ class ZCodeBackend:
                 })
             elif role == "assistant" and message.get("finish") == "stop" and turns:
                 # 只保留每轮最终回答；中间 tool-calls 步骤不进入命名上下文。
-                texts = text_parts.get(message_id, [])
-                if not texts:
+                parts = text_parts.get(message_id, [])
+                if not parts:
                     continue
-                item = {"type": "agentMessage", "text": "\n".join(texts)}
+                stamps = [p.get("time", {}).get("end") for p in parts if p.get("time")]
+                item = {"type": "agentMessage", "text": "\n".join(p["text"] for p in parts),
+                        "completed_at": max(stamps) if stamps else None}
                 turns[-1]["items"] = [i for i in turns[-1]["items"] if i["type"] != "agentMessage"]
                 turns[-1]["items"].append(item)
         return turns

@@ -22,8 +22,8 @@ python install.py        # 安装；python install.py --uninstall 卸载
 
 ```bash
 cd scripts
-python kk_zcode_title.py setup    # 检测 ZCode 已接入厂商 + 真实测试 + 挑轻量模型
-python kk_zcode_title.py setup --use "Z.ai - API Key" --use deepseek   # 按优先级写入（可多家兜底）
+python kk_zcode_title.py setup                    # 检测 ZCode 已接入厂商 + 真实测试 + 挑轻量模型
+python kk_zcode_title.py setup --use <厂商A> --use <厂商B>   # 按优先级写入（可多家兜底，名称来自检测结果）
 python kk_zcode_title.py doctor   # 全检
 ```
 
@@ -57,7 +57,7 @@ python kk_zcode_title.py status / pause / resume
 
 - 直接写 ZCode 私有会话库是当前唯一改名通道；ZCode 升级若调整表结构，`doctor` 会报告 `db_status: error`，届时回滚方式见下。
 - 内置标题生成器与插件的写入共存：实测已结束会话不会被覆盖；进行中会话的表现以日志为准。
-- 闲置归档功能暂未迁移。
+- 闲置归档：默认关闭，`archive_policy.py scan --live` 预览评估、`archive <ID>` 复核后归档（只写时间戳不删数据），详见 SKILL。
 
 ## 回滚
 

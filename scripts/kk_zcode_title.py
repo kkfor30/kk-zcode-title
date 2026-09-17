@@ -14,7 +14,6 @@ import sys
 import tempfile
 import time
 import unicodedata
-import uuid
 
 from zcode_adapter import (BackendError, ModelSkipped, ZCodeBackend, db_path,
                            detect_providers, generate_title, process_options,
@@ -94,10 +93,12 @@ def load_config(root):
 
 
 def valid_id(value):
+    """校验会话标识尾部必须是 UUID；返回原始值以保持与会话库一致。"""
     raw = str(value)
-    if raw.startswith("sess_"):
-        raw = raw[5:]
-    return "sess_" + str(uuid.UUID(raw))
+    if not re.search(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", raw):
+        raise ValueError("无效的会话标识")
+    return raw
 
 
 @contextmanager
