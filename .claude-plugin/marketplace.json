@@ -1,0 +1,20 @@
+{
+  "name": "kk-plugins",
+  "description": "kk 的 ZCode 插件：话题自动命名等效率工具",
+  "owner": {
+    "name": "kk"
+  },
+  "plugins": [
+    {
+      "name": "kk-zcode-title",
+      "source": "./",
+      "description": "每轮对话结束后，用独立轻量模型按「类别 emoji + 对象｜目标」格式自动维护稳定的 ZCode 话题标题；支持厂商检测、模型优先级链与额度耗尽自动切换。",
+      "version": "0.2.0",
+      "author": {
+        "name": "kk"
+      },
+      "category": "productivity",
+      "keywords": ["title", "naming", "session", "emoji", "自动化"]
+    }
+  ]
+}

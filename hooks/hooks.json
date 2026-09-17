@@ -1,0 +1,21 @@
+{
+  "description": "在后台用独立模型检查话题标题，只更新标题元数据。入口立即派生独立 Worker，不阻塞对话。",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/kk_zcode_title.py",
+              "hook"
+            ],
+            "timeoutMs": 15000,
+            "statusMessage": "更新话题标题"
+          }
+        ]
+      }
+    ]
+  }
+}

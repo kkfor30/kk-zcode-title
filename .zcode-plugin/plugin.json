@@ -1,0 +1,9 @@
+{
+  "name": "kk-zcode-title",
+  "version": "0.2.0+zcode.1",
+  "description": "在每轮对话结束后，用独立模型按用户的主要交流语言维护稳定的 emoji 话题标题。",
+  "author": {
+    "name": "kk"
+  },
+  "skills": "./skills/"
+}
