@@ -23,7 +23,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: 语法检查
-        run: python -m compileall -q scripts skills install.py
+        run: python -m compileall -q scripts skills tests install.py
 
       - name: 校验清单文件
         run: |
@@ -43,12 +43,20 @@ jobs:
       - name: Hook 入口冒烟（离线，不调用模型）
         env:
           HOME: ${{ runner.temp }}/kk-smoke
+          KK_ZCODE_TITLE_DATA: ${{ runner.temp }}/kk-smoke-data
+          KK_ZCODE_TITLE_DB: ${{ runner.temp }}/kk-smoke-data/missing.sqlite
         run: |
-          mkdir -p "$HOME"
-          out=$(printf '%s' '{"hook_event_name":"Stop","session_id":"sess_smoke"}' \
+          mkdir -p "$HOME" "$KK_ZCODE_TITLE_DATA"
+          out=$(printf '%s' '{"hook_event_name":"Stop","session_id":"sess_00000000-0000-4000-8000-000000000000"}' \
                 | timeout 10 python scripts/kk_zcode_title.py hook)
           echo "stdout: [$out]"
           test "$out" = '{}'
+
+      - name: 离线单元测试
+        env:
+          KK_ZCODE_TITLE_RETRY_WAIT: '0'
+          KK_ZCODE_TITLE_SETTLE_TIMEOUT: '0'
+        run: python -m unittest discover -s tests -v
 
       - name: 交付文件齐全
         run: |

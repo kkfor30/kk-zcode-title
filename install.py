@@ -37,10 +37,25 @@ def backup(path: Path) -> Path | None:
 
 
 def read_json(path: Path, default):
+    if not path.exists():
+        return default
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return default
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"无法解析 {path}：{exc}；已中止以免覆盖原配置") from exc
+
+
+def patch_hook_interpreter(plugin_root: Path, python_exe: str | None = None) -> str:
+    """把 Stop Hook 的 process.command 写成当前解释器，避免桌面 PATH 找不到 python。"""
+    path = plugin_root / "hooks" / "hooks.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    command = python_exe or sys.executable
+    for group in data.get("hooks", {}).get("Stop", []):
+        for hook in group.get("hooks", []):
+            if hook.get("type") == "process":
+                hook["command"] = command
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return command
 
 
 def register(install_path: Path, version: str) -> None:
@@ -83,12 +98,16 @@ def install(dev: bool) -> int:
             target = INSTALL_ROOT
 
     backups = [str(b) for b in (backup(REGISTRY), backup(CONFIG)) if b]
+    interpreter = patch_hook_interpreter(target)
     register(target, manifest.get("version", "0"))
     mode = "开发模式（注册当前目录）" if dev else f"已安装到 {INSTALL_ROOT}"
     print(f"已注册并启用 {PLUGIN_ID}；{mode}")
+    print(f"Hook 解释器：{interpreter}")
     if backups:
         print(f"配置备份（系统临时目录）：{'、'.join(backups)}")
-    print("请重启 ZCode 生效；首次使用执行 scripts/kk_zcode_title.py setup 配置命名模型。")
+    print("请完全退出并重启 ZCode 后 Hook 才会挂载；首次使用执行 scripts/kk_zcode_title.py setup 配置命名模型。")
+    if dev:
+        print("开发模式改写了 hooks.json 的 command 字段，请勿把本机 Python 路径提交进仓库。")
     return 0
 
 

@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 
 from zcode_adapter import (BackendError, ModelSkipped, ZCodeBackend, db_path,
                            detect_providers, generate_title, process_options,
-                           test_model, worker_env)
+                           test_model, trivial_user_text, worker_env)
 import file_lock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +39,43 @@ DEFAULTS = {
 }
 EMOJI = ("🎬", "🔧", "🐛", "🚀", "📊", "🌐", "🔎", "🎨", "📝", "📅", "⚙️", "💬")
 POLICY_VERSION = 8
+EXCERPT_VERSION = 1
+WORKER_RETRY_WAIT_SECONDS = float(os.environ.get("KK_ZCODE_TITLE_RETRY_WAIT", "10"))
+HOOK_STDIN_TIMEOUT_SECONDS = float(os.environ.get("KK_ZCODE_TITLE_STDIN_TIMEOUT", "2"))
+SETTLE_TIMEOUT_SECONDS = float(os.environ.get("KK_ZCODE_TITLE_SETTLE_TIMEOUT", "5"))
+HOOK_SMOKE_SESSION = "sess_00000000-0000-4000-8000-000000000000"
+BACKLOG_LIMIT_MAX = 20
+VS16 = "\uFE0F"
+
+
+def allowed_emoji_tokens():
+    """允许的类别 emoji；⚙️ 带或不带变异选择符都算合法。"""
+    tokens = []
+    for emoji in EMOJI:
+        tokens.append(emoji)
+        if emoji.endswith(VS16):
+            tokens.append(emoji[:-1])
+        else:
+            tokens.append(emoji + VS16)
+    return tuple(dict.fromkeys(tokens))
+
+
+ALLOWED_EMOJI = allowed_emoji_tokens()
+
+
+def coerce_legacy_category_emoji(title):
+    """旧开发图标只换类别，不改对象与目标，避免为此再打一次模型。"""
+    if not isinstance(title, str) or " " not in title:
+        return title
+    emoji, body = title.split(" ", 1)
+    base = emoji.replace(VS16, "")
+    if base in ("🧩", "🛠"):
+        return "🔧 " + body
+    return title
+
+
+def title_has_allowed_emoji(title):
+    return any(title.startswith(token + " ") for token in ALLOWED_EMOJI)
 
 
 def data_dir():
@@ -158,13 +198,13 @@ def ensure_title_active(backend, thread_id, root):
         raise ModelSkipped("locked")
 
 
-def read_settled_thread(backend, thread_id, event_turn, timeout=5):
+def read_settled_thread(backend, thread_id, event_turn, timeout=None):
     """确认事件轮次已完成并落库；持久化略有延迟时短暂轮询。
 
     event_turn 为 "latest" 时以读取到的最后一轮为事件轮次（Stop 触发时
     最后一轮即事件轮次）；否则与轮次序号比对，之后的新轮次使事件过期。
     """
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + (SETTLE_TIMEOUT_SECONDS if timeout is None else timeout)
     while True:
         thread = backend.read(thread_id)
         turns = thread.get("turns", [])
@@ -277,13 +317,14 @@ def snapshot(thread, config):
     latest_id = turns[-1]["id"] if turns else None
     context = {"current_title": title, "project_hint": project_hint(thread),
                "original_goal": original, "recent_turns": recent}
-    signature = json.dumps({"policy_version": POLICY_VERSION, "project_hint": context["project_hint"],
+    signature = json.dumps({"project_hint": context["project_hint"],
                            "latest_id": latest_id, "effective": effective[-config["recent_turns"]:]},
                            ensure_ascii=False, sort_keys=True)
     fingerprint = hashlib.sha256(signature.encode()).hexdigest()
     scope_key = hashlib.sha256(str(thread["cwd"]).encode()).hexdigest() if thread.get("cwd") else ""
     return {"title": title, "latest_id": latest_id, "fingerprint": fingerprint,
-            "context": context, "has_messages": bool(effective), "scope_key": scope_key}
+            "context": context, "has_messages": bool(effective), "scope_key": scope_key,
+            "excerpt_version": EXCERPT_VERSION, "title_source": thread.get("title_source") or ""}
 
 
 def validate_candidate(candidate, current_title):
@@ -296,12 +337,13 @@ def validate_candidate(candidate, current_title):
     if candidate["action"] == "keep":
         candidate = {**candidate, "title": current_title}
     else:
-        title = candidate["title"]
+        title = coerce_legacy_category_emoji(candidate["title"])
         if title != title.strip() or not 4 <= len(title) <= 48:
             raise ValueError("标题长度或空白无效")
-        if not any(title.startswith(e + " ") for e in EMOJI):
+        if not title_has_allowed_emoji(title):
             raise ValueError("标题缺少允许的类别 emoji")
         body = title.split(" ", 1)[1]
+        candidate = {**candidate, "title": title}
         if body.count("｜") != 1 or "|" in body:
             raise ValueError("标题必须采用对象｜目标结构")
         if any(not part or part != part.strip() for part in body.split("｜")):
@@ -316,6 +358,36 @@ def validate_candidate(candidate, current_title):
         if any(x in title for x in ("\n", "\r", "`", "https://", "http://", "@", "/Users/", "sk-")):
             raise ValueError("标题含不允许的格式或私人信息")
     return {**candidate, "reason": candidate["reason"][:300]}
+
+
+def title_compliant(title):
+    if not title:
+        return False
+    try:
+        validate_candidate({"action": "rename", "title": title, "reason": "check"}, title)
+        return True
+    except ValueError:
+        return False
+
+
+def latest_user_is_trivial(context):
+    texts = [
+        message.get("text", "")
+        for turn in context.get("recent_turns", [])
+        for message in turn.get("messages", [])
+        if message.get("role") == "user"
+    ]
+    return (not texts) or trivial_user_text(texts[-1])
+
+
+def remember_fingerprint(path, state, before, extra=None):
+    state.update(last_fingerprint=before["fingerprint"], excerpt_version=EXCERPT_VERSION,
+                 policy_version=POLICY_VERSION, last_seen_title=before["title"],
+                 last_turn_id=before["latest_id"], scope_key=before["scope_key"],
+                 updated_at=int(time.time()))
+    if extra:
+        state.update(extra)
+    atomic_json(path, state)
 
 
 def process_thread(backend, generator, thread_id, root, config, *, apply=False, event_turn=None):
@@ -339,6 +411,8 @@ def process_thread(backend, generator, thread_id, root, config, *, apply=False, 
         before = snapshot(thread, config)
         if not before["has_messages"]:
             return {"status": "empty"}
+        if (thread.get("title_source") or before.get("title_source")) == "custom":
+            return {"status": "manual_title", "title": before["title"]}
         # 上次写入后进程被中断时，先核对待确认结果，避免误认作手工改名。
         if state.get("pending_title") == before["title"]:
             state.update(last_seen_title=before["title"], last_generated_title=before["title"])
@@ -363,6 +437,17 @@ def process_thread(backend, generator, thread_id, root, config, *, apply=False, 
             return {"status": "manual_title", "title": before["title"]}
         if state.get("last_fingerprint") == before["fingerprint"]:
             return {"status": "unchanged", "title": before["title"]}
+        if title_compliant(before["title"]) and state.get("excerpt_version") != EXCERPT_VERSION:
+            if apply:
+                remember_fingerprint(path, state, before)
+            return {"status": "unchanged", "title": before["title"]}
+        if title_compliant(before["title"]) and latest_user_is_trivial(before["context"]):
+            if apply:
+                remember_fingerprint(path, state, before)
+                audit(root, thread_id, {"status": "kept", "action": "keep",
+                                        "title": before["title"], "usage": {}})
+            return {"status": "kept", "action": "keep", "title": before["title"],
+                    "reason": "标题已合规，最近一轮只是问候或确认", "usage": {}}
         try:
             ensure_title_active(backend, thread_id, root)
             candidate, usage = generator(before["context"])
@@ -398,7 +483,8 @@ def process_thread(backend, generator, thread_id, root, config, *, apply=False, 
         if after["title"] != before["title"] or after["fingerprint"] != before["fingerprint"]:
             return {"status": "stale_result"}
         state.update(last_seen_title=before["title"], last_turn_id=before["latest_id"],
-                     scope_key=before["scope_key"], updated_at=int(time.time()))
+                     scope_key=before["scope_key"], excerpt_version=EXCERPT_VERSION,
+                     policy_version=POLICY_VERSION, updated_at=int(time.time()))
         if candidate["action"] == "rename" and candidate["title"] != before["title"]:
             state["pending_title"] = candidate["title"]
             atomic_json(path, state)
@@ -423,7 +509,44 @@ def process_thread(backend, generator, thread_id, root, config, *, apply=False, 
         return result
 
 
-def hook_registration_state():
+def hook_python_command(hooks_file):
+    try:
+        data = json.loads(hooks_file.read_text(encoding="utf-8"))
+        for group in data.get("hooks", {}).get("Stop", []):
+            for hook in group.get("hooks", []):
+                if hook.get("type") == "process" and hook.get("command"):
+                    return str(hook["command"])
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def python_command_available(command):
+    if not command:
+        return False
+    path = Path(command)
+    if path.is_file():
+        return True
+    return shutil.which(command) is not None
+
+
+def last_hook_audit(root):
+    path = root / "logs" / "hook.jsonl"
+    if not path.exists():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            return json.loads(line)
+        except ValueError:
+            continue
+    return None
+
+
+def hook_registration_state(root=None):
     """检查插件是否已注册并启用；只读配置，不修改状态。"""
     plugins_dir = Path.home() / ".zcode" / "cli" / "plugins"
     registered = None
@@ -443,8 +566,19 @@ def hook_registration_state():
     except (OSError, ValueError):
         pass
     hooks_file = Path(registered) / "hooks" / "hooks.json"
-    return {"status": "ready" if enabled and hooks_file.exists() else "registered_disabled",
-            "install_path": registered, "hooks_json": hooks_file.exists()}
+    command = hook_python_command(hooks_file) if hooks_file.exists() else None
+    python_ok = python_command_available(command)
+    audit_entry = last_hook_audit(root) if root is not None else None
+    if not enabled or not hooks_file.exists():
+        status = "registered_disabled"
+    elif not python_ok:
+        status = "python_not_found"
+    else:
+        status = "ready"
+    return {"status": status, "install_path": registered, "hooks_json": hooks_file.exists(),
+            "python_command": command, "python_available": python_ok,
+            "last_hook_audit": audit_entry.get("status") if audit_entry else None,
+            "last_hook_time": audit_entry.get("time") if audit_entry else None}
 
 
 def redact_config(config):
@@ -453,12 +587,43 @@ def redact_config(config):
             "providers": [{**p, "api_key": "***"} for p in config["providers"]]}
 
 
+def smoke_hook_entry():
+    """在临时数据目录跑一次 Hook：必须秒回 {}，不打模型、不碰用户会话库。"""
+    with tempfile.TemporaryDirectory(prefix="kk-zcode-title-smoke-") as tmp:
+        env = os.environ.copy()
+        env["KK_ZCODE_TITLE_DATA"] = tmp
+        env["KK_ZCODE_TITLE_DB"] = str(Path(tmp) / "missing.sqlite")
+        env.pop("KK_ZCODE_TITLE_WORKER", None)
+        payload = json.dumps({
+            "hook_event_name": "Stop",
+            "session_id": HOOK_SMOKE_SESSION,
+        })
+        started = time.monotonic()
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "hook"],
+                input=payload, capture_output=True, timeout=5, env=env,
+                cwd=str(ROOT), text=True, encoding="utf-8",
+            )
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "timeout", "stdout": "", "elapsed_ms": 5000}
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        stdout = (proc.stdout or "").strip()
+        return {"ok": stdout == "{}" and proc.returncode == 0, "stdout": stdout,
+                "returncode": proc.returncode, "elapsed_ms": elapsed_ms}
+
+
 def doctor(root, config, thread_id=None):
+    hook = hook_registration_state(root)
+    smoke = smoke_hook_entry()
+    if hook.get("status") == "ready" and not smoke["ok"]:
+        hook = {**hook, "status": "hook_smoke_failed"}
+    hook["smoke"] = smoke
     output = {"python": sys.version.split()[0], "config": redact_config(config),
               "data_dir": str(root), "db": str(db_path()), "db_status": "unknown",
               "model_configured": bool(config["providers"]) or all(
                   config.get(k) for k in ("model", "base_url", "api_key")),
-              "hook": hook_registration_state()}
+              "hook": hook}
     try:
         with ZCodeBackend() as backend:
             output["db_status"] = "ok"
@@ -523,6 +688,74 @@ def run_setup(root, args):
             "note": "前者额度耗尽或失败时自动切换后者", "tests": tests}
 
 
+def is_subagent_session(meta):
+    tid = str(meta.get("id") or "")
+    return bool(meta.get("parent_id")) or "subagent" in tid
+
+
+def project_label(cwd):
+    if not cwd:
+        return ""
+    name = Path(cwd).name
+    return name[:64] if name else ""
+
+
+def backlog_candidates(backend, root, *, current_id=None, limit=20):
+    """本地筛选不合规主会话；不调用模型。"""
+    skipped = Counter()
+    candidates = []
+    current_id = valid_id(current_id) if current_id else None
+    for meta in backend.list_sessions(archived=False):
+        tid = str(meta.get("id") or "")
+        try:
+            valid_id(tid)
+        except ValueError:
+            skipped["invalid_id"] += 1
+            continue
+        if current_id and tid == current_id:
+            skipped["current"] += 1
+            continue
+        if is_subagent_session(meta):
+            skipped["subagent"] += 1
+            continue
+        if (meta.get("title_source") or "") == "custom":
+            skipped["custom"] += 1
+            continue
+        if read_json(state_path(root, tid)).get("locked"):
+            skipped["locked"] += 1
+            continue
+        title = meta.get("name") or ""
+        if trivial_user_text(title):
+            skipped["trivial"] += 1
+            continue
+        if title_compliant(title):
+            skipped["already_formatted"] += 1
+            continue
+        candidates.append({"id": tid, "title": title, "project": project_label(meta.get("cwd"))})
+        if len(candidates) >= limit:
+            break
+    return {"status": "preview", "limit": limit, "candidates": candidates,
+            "skipped": dict(skipped), "count": len(candidates)}
+
+
+def run_backlog(backend, root, config, *, apply=False, current_id=None, limit=20):
+    report = backlog_candidates(backend, root, current_id=current_id, limit=limit)
+    if not apply:
+        return report
+    results = []
+    for item in report["candidates"]:
+        outcome = process_thread(
+            backend, lambda context: limited_title(root, config, context),
+            item["id"], root, config, apply=True,
+        )
+        results.append({"id": item["id"], "old": item["title"],
+                        "status": outcome.get("status"), "title": outcome.get("title"),
+                        "usage": outcome.get("usage") or {}})
+    counts = Counter(row["status"] for row in results)
+    return {"status": "applied", "limit": limit, "counts": dict(counts),
+            "skipped": report["skipped"], "results": results}
+
+
 def spawn_worker(session_raw):
     """派生独立后台进程执行命名；Hook 入口立即返回，不阻塞对话。"""
     args = [sys.executable, str(Path(__file__).resolve()), "worker", valid_id(session_raw)]
@@ -535,11 +768,53 @@ def spawn_worker(session_raw):
     else:
         options["stderr"] = subprocess.DEVNULL
     if sys.platform == "win32":
-        # DETACHED_PROCESS 未在 subprocess 模块导出，值为 Win32 标志 0x00000008。
-        options["creationflags"] = (0x00000008 | subprocess.CREATE_NEW_PROCESS_GROUP)
+        # DETACHED_PROCESS=0x8；CREATE_NO_WINDOW 避免桌面弹出控制台。
+        flags = process_options().get("creationflags", 0)
+        options["creationflags"] = flags | 0x00000008 | subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         options["start_new_session"] = True
     subprocess.Popen(args, **options)
+
+
+def read_hook_stdin(max_bytes=1024 * 1024, timeout=HOOK_STDIN_TIMEOUT_SECONDS):
+    """有界读取 Hook stdin。宿主若不关闭管道，超时后仍可用环境变量里的会话 ID。"""
+    try:
+        if sys.stdin.closed or sys.stdin.isatty():
+            return ""
+    except Exception:
+        return ""
+    chunks = []
+    done = threading.Event()
+
+    def _read():
+        try:
+            chunks.append(sys.stdin.read(max_bytes))
+        except Exception:
+            chunks.append("")
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_read, daemon=True)
+    thread.start()
+    done.wait(timeout)
+    return chunks[0] if chunks else ""
+
+
+def hook_session_id(event):
+    raw = (event.get("session_id") or event.get("sessionId")
+           or os.environ.get("CLAUDE_SESSION_ID")
+           or os.environ.get("ZCODE_SESSION_ID")
+           or os.environ.get("CLAUDE_CODE_SESSION_ID"))
+    return raw if isinstance(raw, str) and raw.strip() else None
+
+
+def hook_event_is_stop(event):
+    name = event.get("hook_event_name") or event.get("hookEventName")
+    return name in (None, "Stop")
+
+
+def hook_stop_already_active(event):
+    return bool(event.get("stop_hook_active") or event.get("stopHookActive"))
 
 
 def main():
@@ -570,6 +845,10 @@ def main():
         p.add_argument("thread_id")
         if name == "rename":
             p.add_argument("--apply", action="store_true", help="写入；省略时只预览")
+    p = sub.add_parser("backlog", help="预览或补齐不合规的历史主会话标题")
+    p.add_argument("--apply", action="store_true", help="写入；省略时只列出候选")
+    p.add_argument("--limit", type=int, default=20, help="单次最多处理条数，1～20")
+    p.add_argument("--current-id", default=None, help="当前会话 ID，始终跳过")
     args = parser.parse_args()
     root = data_dir()
     is_hook = args.command == "hook"
@@ -581,21 +860,20 @@ def main():
         if is_hook:
             if os.environ.get("KK_ZCODE_TITLE_WORKER") == "1" or not config["enabled"]:
                 return 0
-            raw = sys.stdin.read(1024 * 1024)
+            raw = read_hook_stdin()
             try:
                 event = json.loads(raw) if raw.strip() else {}
             except ValueError:
                 event = {}
-            if event.get("hook_event_name") not in (None, "Stop") or event.get("stop_hook_active"):
+            if not isinstance(event, dict):
+                event = {}
+            if not hook_event_is_stop(event) or hook_stop_already_active(event):
                 return 0
             # 记录原始事件供诊断；不含对话内容。
             audit(root, "hook", {"status": "event_received",
                                  "event_keys": sorted(event.keys()),
-                                 "has_session_id": "session_id" in event,
-                                 "has_turn_id": "turn_id" in event})
-            session_raw = (event.get("session_id")
-                           or os.environ.get("CLAUDE_SESSION_ID")
-                           or os.environ.get("ZCODE_SESSION_ID"))
+                                 "has_session_id": bool(hook_session_id(event))})
+            session_raw = hook_session_id(event)
             if not session_raw:
                 audit(root, "hook", {"status": "error", "error_type": "missing_session_id"})
                 return 0
@@ -628,6 +906,13 @@ def main():
             return 0
         if args.command == "doctor":
             result = doctor(root, config, args.thread)
+        elif args.command == "backlog":
+            if not 1 <= args.limit <= BACKLOG_LIMIT_MAX:
+                raise ValueError(f"单次补齐数量必须在 1～{BACKLOG_LIMIT_MAX} 之间")
+            current_id = args.current_id or os.environ.get("ZCODE_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID")
+            with ZCodeBackend() as backend:
+                result = run_backlog(backend, root, config, apply=args.apply,
+                                     current_id=current_id, limit=args.limit)
         else:
             thread_id = thread_id or valid_id(args.thread_id)
             with ZCodeBackend() as backend:
@@ -651,10 +936,9 @@ def main():
                         thread_id, root, config, apply=is_worker or args.apply,
                         event_turn="latest" if is_worker else None,
                     )
-                    # Stop 事件发出后宿主可能仍在异步落库，首轮评估易过期；
-                    # 稍候重读快照再试一次，避免最后一轮的标题缺失。
-                    if is_worker and result["status"] == "stale_result":
-                        time.sleep(15)
+                    # Stop 发出后宿主可能仍在落库；过期或未完成轮次各再读一次。
+                    if is_worker and result["status"] in ("stale_result", "turn_not_settled"):
+                        time.sleep(WORKER_RETRY_WAIT_SECONDS)
                         result = process_thread(
                             backend, lambda context: limited_title(root, config, context,
                                 before_model=lambda: ensure_title_active(backend, thread_id, root)),

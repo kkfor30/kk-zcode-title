@@ -231,6 +231,63 @@ def test_model(provider: dict, model: str, timeout: float = 15) -> dict:
             "latency_ms": latency, "chars": len(text)}
 
 
+INJECTED_USER_SOURCES = frozenset({
+    "todo_reminder", "rewind", "background_task", "plugin_reference", "selection_side_chat",
+})
+INJECTED_USER_ORIGINS = frozenset({"agent_runtime", "system"})
+FINAL_ASSISTANT_FINISH = frozenset({"stop", "completed"})
+SKIP_ASSISTANT_FINISH = frozenset({
+    "tool-calls", "stream_recovery_discarded", "start_plan_admission_retry_discarded",
+})
+TRIVIAL_USER = frozenset({
+    "", "你好", "您好", "hi", "hello", "嗨", "谢谢", "好的", "好", "ok", "收到", "继续", "嗯", "thanks",
+})
+
+
+def trivial_user_text(text: str) -> bool:
+    return re.sub(r"[\W_]+", "", text or "").casefold() in TRIVIAL_USER
+
+
+def is_real_user_message(message: dict) -> bool:
+    """真实用户输入；过滤 todo/rewind 等宿主注入。无 semantics 时仍看 synthetic/source/visibility。"""
+    if not isinstance(message, dict):
+        return False
+    if message.get("synthetic") is True:
+        return False
+    if message.get("visibility") == "model-only":
+        return False
+    if message.get("source") in INJECTED_USER_SOURCES:
+        return False
+    semantics = message.get("semantics") or {}
+    if semantics.get("origin") in INJECTED_USER_ORIGINS:
+        return False
+    for key in ("uiVisibility", "providerVisibility", "transcriptVisibility"):
+        if semantics.get(key) == "model-only":
+            return False
+    return True
+
+
+def is_final_assistant(message: dict, parts: list) -> bool:
+    """每轮最终回答只认 stop/completed。空 finish 可能是流式中间态，不能当说完。"""
+    if not parts:
+        return False
+    finish = message.get("finish")
+    if finish in SKIP_ASSISTANT_FINISH:
+        return False
+    return finish in FINAL_ASSISTANT_FINISH
+
+
+def schema_field_names(output_schema) -> list[str]:
+    if isinstance(output_schema, dict):
+        required = output_schema.get("required")
+        if required:
+            return list(required)
+        properties = output_schema.get("properties") or {}
+        if properties:
+            return list(properties)
+    return ["action", "title", "reason"]
+
+
 def _ro_connect(path: Path) -> sqlite3.Connection:
     uri = "file:" + urllib.parse.quote(str(path).replace("\\", "/")) + "?mode=ro"
     conn = sqlite3.connect(uri, uri=True, timeout=10)
@@ -260,22 +317,25 @@ class ZCodeBackend:
     def read(self, session_id: str) -> dict:
         """组装为与原 Codex thread 相同形状：name/cwd/turns(id+items)。"""
         row = self._ro.execute(
-            "SELECT title, directory, time_archived, parent_id FROM session WHERE id = ?",
+            "SELECT title, directory, time_archived, parent_id, title_source "
+            "FROM session WHERE id = ?",
             (session_id,)).fetchone()
         if row is None:
             raise BackendError("会话不存在：" + session_id)
-        title, directory, archived, parent_id = row
+        title, directory, archived, parent_id, title_source = row
         turns = self._read_turns(session_id)
         return {"id": session_id, "name": title or "", "cwd": directory or "",
                 "archived": archived is not None, "parent_id": parent_id or "",
-                "turns": turns}
+                "title_source": title_source or "", "turns": turns}
 
     def list_sessions(self, *, archived: bool = False) -> list[dict]:
-        """未归档（或已归档）会话的元数据清单；归档扫描用。"""
+        """未归档（或已归档）会话的元数据清单；归档扫描与历史补齐用。"""
         condition = "time_archived IS NOT NULL" if archived else "time_archived IS NULL"
         rows = self._ro.execute(
-            f"SELECT id, title, directory, parent_id FROM session WHERE {condition}").fetchall()
-        return [{"id": r[0], "name": r[1] or "", "cwd": r[2] or "", "parent_id": r[3] or ""}
+            f"SELECT id, title, directory, parent_id, title_source, time_updated "
+            f"FROM session WHERE {condition} ORDER BY time_updated DESC").fetchall()
+        return [{"id": r[0], "name": r[1] or "", "cwd": r[2] or "", "parent_id": r[3] or "",
+                 "title_source": r[4] or "", "time_updated": r[5] or 0}
                 for r in rows]
 
     def archive(self, session_id: str):
@@ -311,10 +371,9 @@ class ZCodeBackend:
         for message_id, sequence, message_json in messages:
             message = json.loads(message_json)
             role = message.get("role")
-            semantics = message.get("semantics") or {}
             if role == "user":
-                if semantics.get("origin") not in (None, "real_user"):
-                    continue  # 过滤宿主注入的用户消息
+                if not is_real_user_message(message):
+                    continue
                 texts = [p["text"] for p in text_parts.get(message_id, [])]
                 if not texts:
                     continue
@@ -323,10 +382,9 @@ class ZCodeBackend:
                     "items": [{"type": "userMessage",
                                "content": [{"type": "text", "text": t} for t in texts]}],
                 })
-            elif role == "assistant" and message.get("finish") == "stop" and turns:
-                # 只保留每轮最终回答；中间 tool-calls 步骤不进入命名上下文。
+            elif role == "assistant" and turns:
                 parts = text_parts.get(message_id, [])
-                if not parts:
+                if not is_final_assistant(message, parts):
                     continue
                 stamps = [p.get("time", {}).get("end") for p in parts if p.get("time")]
                 item = {"type": "agentMessage", "text": "\n".join(p["text"] for p in parts),
@@ -452,7 +510,8 @@ def generate_json(config, context, policy, output_schema, *, before_model=None, 
         raise BackendError("命名模型未配置；请执行 setup 检测厂商并选择，"
                            "或 configure --model <模型> --base-url <地址> --api-key <密钥>")
     policy_text = Path(policy).read_text(encoding="utf-8") if isinstance(policy, (str, Path)) else policy
-    system = policy_text + "\n\n只输出一个 JSON 对象，字段恰好为 action、title、reason；不要输出其他文本。"
+    fields = "、".join(schema_field_names(output_schema))
+    system = policy_text + f"\n\n只输出一个 JSON 对象，字段恰好为 {fields}；不要输出其他文本。"
     errors = []
     for provider in providers:
         label = provider.get("name") or provider.get("model")
@@ -476,12 +535,11 @@ def generate_json(config, context, policy, output_schema, *, before_model=None, 
 
 def _generate_title_once(config, context, plugin_root, *, before_model=None, state_dir=None):
     # 只有问候/确认时没有命名证据；确定性保留，避免模型凭空生成"普通讨论"。
-    trivial = {"", "你好", "您好", "hi", "hello", "嗨", "谢谢", "好的", "好", "ok", "收到", "继续", "嗯"}
     user_texts = [context.get("original_goal", "")] + [
         message.get("text", "") for turn in context.get("recent_turns", [])
         for message in turn.get("messages", []) if message.get("role") == "user"
     ]
-    if all(re.sub(r"[\W_]+", "", text).casefold() in trivial for text in user_texts):
+    if all(trivial_user_text(text) for text in user_texts):
         return {"action": "keep", "title": context.get("current_title", ""),
                 "reason": "只有问候或确认，缺少新的命名依据"}, {}
     result, usage = generate_json(config, context, plugin_root / "prompts/naming.md", SCHEMA,
