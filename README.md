@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero.webp" width="100%" alt="kk-zcode-title：左侧「原来的标题」是自动命名前的模糊标题（新会话、帮我看下这个页面、继续修改），右侧是命名后 ZCode 侧边栏里的标题——产品短片｜分镜调整、登录页｜视觉还原、推理模型｜选型对比">
+  <img src="./assets/readme/hero.svg" width="100%" alt="kk-zcode-title：左侧「原来的标题」是自动命名前的模糊标题（新会话、帮我看看这个、继续修改），右侧是命名后 ZCode 侧边栏里的标题——🔧 邮箱注册｜验证码重发、🐛 支付回调｜重复扣款排查、🚀 邮件服务｜容器化上线">
 </p>
 
 <p align="center">
@@ -61,7 +61,7 @@ python kk_zcode_title.py doctor                           # 全检：Python、�
 ## 它怎么工作
 
 <p align="center">
-  <img src="./assets/readme/how-it-works.svg" width="100%" alt="流程：对话结束触发 Stop Hook，入口解析事件后立即派生独立 Worker 并返回空 JSON；Worker 读取会话库最近 3 到 5 轮，调用独立轻量模型判断 keep 或 rename，最后以短事务写回 session.title 并读回核验，同时落审计日志">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="流程：对话结束触发 Stop Hook，入口解析事件后立即派生独立 Worker 并返回空 JSON；Worker 读取会话库最近 3 到 5 轮，调用独立轻量模型判断 keep 或 rename，最后以短事务写回 session.title 并读回核验，同时落审计日志">
 </p>
 
 对话结束时会触发 Stop Hook。入口进程只做一件事：解析事件、派生一个独立 Worker、立刻返回空 JSON——所以它**不会拖慢你的对话**。真正的判断在后台完成，模型拿到的只是最近几轮的摘录，不是完整对话记录。
@@ -71,7 +71,7 @@ python kk_zcode_title.py doctor                           # 全检：Python、�
 ## 类别体系
 
 <p align="center">
-  <img src="./assets/readme/categories.webp" width="100%" alt="十二个类别 emoji：🎬 内容制作、🔧 工具开发、🐛 故障排查、🚀 部署上线、📊 数据分析、🌐 网络代理、🔎 对比调研、🎨 页面设计、📝 方法整理、📅 日程安排、⚙️ 环境配置、💬 一般讨论">
+  <img src="./assets/readme/categories.svg" width="100%" alt="十二个类别 emoji：🎬 内容制作、🔧 工具开发、🐛 故障排查、🚀 部署上线、📊 数据分析、🌐 网络代理、🔎 对比调研、🎨 页面设计、📝 方法整理、📅 日程安排、⚙️ 环境配置、💬 一般讨论">
 </p>
 
 | 类别 | 覆盖的工作 |
