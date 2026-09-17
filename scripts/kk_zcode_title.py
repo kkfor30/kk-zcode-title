@@ -34,8 +34,8 @@ DEFAULTS = {
     "model_timeout_seconds": 100,
     "max_parallel_workers": 2,
 }
-EMOJI = ("🎬", "🧩", "🔎", "📝", "📅", "🎨", "⚙️", "💬")
-POLICY_VERSION = 7
+EMOJI = ("🎬", "🔧", "🐛", "🚀", "📊", "🌐", "🔎", "🎨", "📝", "📅", "⚙️", "💬")
+POLICY_VERSION = 8
 
 
 def data_dir():
