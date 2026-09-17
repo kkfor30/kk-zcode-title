@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: 冒烟（Python ${{ matrix.python-version }}）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 语法检查
+        run: python -m compileall -q scripts skills install.py
+
+      - name: 校验清单文件
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          ok = True
+          for f in ('.zcode-plugin/plugin.json', '.claude-plugin/marketplace.json', 'hooks/hooks.json'):
+              try:
+                  json.loads(pathlib.Path(f).read_text(encoding='utf-8'))
+                  print('ok  ', f)
+              except Exception as exc:
+                  ok = False
+                  print('FAIL', f, exc)
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Hook 入口冒烟（离线，不调用模型）
+        env:
+          HOME: ${{ runner.temp }}/kk-smoke
+        run: |
+          mkdir -p "$HOME"
+          out=$(printf '%s' '{"hook_event_name":"Stop","session_id":"sess_smoke"}' \
+                | timeout 10 python scripts/kk_zcode_title.py hook)
+          echo "stdout: [$out]"
+          test "$out" = '{}'
+
+      - name: 交付文件齐全
+        run: |
+          for f in install.py hooks/hooks.json .zcode-plugin/plugin.json \
+                   prompts/naming.md skills/kk-zcode-title/SKILL.md \
+                   skills/kk-zcode-title/scripts/run.py scripts/kk_zcode_title.py; do
+            test -f "$f" || { echo "缺少 $f"; exit 1; }
+          done
+          echo "全部存在"
